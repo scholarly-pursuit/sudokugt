@@ -1,6 +1,6 @@
 # Sudoku GT
 
-**Play in your browser:** https://USERNAME.github.io/REPOSITORY/
+**Play in your browser:** https://scholarly-pursuit.github.io/sudokugt/
 
 Or run it locally from this folder, then open http://localhost:8765:
 
