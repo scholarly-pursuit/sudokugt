@@ -101,6 +101,8 @@ function openHome() {
 
 const LOAD_TIMEOUT_MS = 20000;
 const SAVE_EVERY_MS = 10000;
+const HOLD_MS = 300; // How long a pad press lasts before it highlights instead of entering
+const HOLD_MOVE_PX = 10; // How far a finger can drift before a press is abandoned
 const CHEVRON = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.500 7.500 5 3 8.500"/></svg>';
 
 function showInvalid() {
@@ -206,6 +208,8 @@ function startGame(puzzle) {
   let pencil = false;
   let paused = false;
   let lastTick = performance.now();
+  let highlighted = 0; // The digit lit up across the board, or 0 for none
+  let hoverDigit = 0; // A pad digit under the mouse, previewed over `highlighted`
 
   const digitButtons = [];
   for (let d = 1; d <= 9; d++) {
@@ -218,7 +222,7 @@ function startGame(puzzle) {
     digitButtons.push(button);
   }
   $('pad').replaceChildren(...digitButtons);
-  $('level').textContent = puzzle.level;
+  $('level').textContent = capitalise(puzzle.level);
 
   function describeCell(i) {
     const r = Math.floor(i / 9) + 1;
@@ -235,7 +239,7 @@ function startGame(puzzle) {
   }
 
   function render() {
-    const selectedDigit = selected >= 0 ? game.values[selected] : 0;
+    const shownDigit = hoverDigit || highlighted;
     const peers = selected >= 0 ? PEERS[selected] : [];
 
     for (let i = 0; i < 81; i++) {
@@ -243,17 +247,17 @@ function startGame(puzzle) {
       const cell = cells[i];
       cell.classList.toggle('selected', i === selected);
       cell.classList.toggle('peer', peers.includes(i));
-      cell.classList.toggle('same', selectedDigit !== 0 && value === selectedDigit && i !== selected);
+      cell.classList.toggle('same', shownDigit !== 0 && value === shownDigit && i !== selected);
       cell.classList.toggle('wrong', game.isWrong(i));
-      cell.firstChild.textContent = paused || !value ? '' : value;
+      cell.firstChild.textContent = value || '';
       cell.tabIndex = i === (selected >= 0 ? selected : 0) ? 0 : -1;
-      cell.setAttribute('aria-label', paused ? 'Paused' : describeCell(i));
+      cell.setAttribute('aria-label', describeCell(i));
 
       noteEls[i].forEach((note, k) => {
         const digit = k + 1;
-        const show = !paused && !value && game.notes[i] & (1 << k);
+        const show = !value && game.notes[i] & (1 << k);
         note.textContent = show ? digit : '';
-        note.classList.toggle('match', Boolean(show) && digit === selectedDigit);
+        note.classList.toggle('match', Boolean(show) && digit === shownDigit);
       });
     }
 
@@ -265,8 +269,9 @@ function startGame(puzzle) {
     digitButtons.forEach((button, k) => {
       const left = game.remaining(k + 1);
       button.disabled = left === 0 || paused || finished;
+      button.classList.toggle('active', k + 1 === shownDigit);
       button.querySelector('small').textContent = left;
-      button.setAttribute('aria-label', `${k + 1}, ${left} left`);
+      button.setAttribute('aria-label', `${k + 1}, ${left} left${k + 1 === shownDigit ? ', highlighted' : ''}`);
     });
 
     $('mistakes').textContent = game.mistakes;
@@ -279,6 +284,7 @@ function startGame(puzzle) {
       $(id).disabled = finished || (paused && id !== 'pause');
     }
     $('paused').hidden = !paused;
+    $('board').classList.toggle('paused', paused);
 
     const record = store.record(code);
     $('solved-banner').hidden = !record?.solved;
@@ -310,10 +316,22 @@ function startGame(puzzle) {
 
   const playable = () => !paused && !game.complete;
 
+  function toggleHighlight(digit) {
+    highlighted = highlighted === digit ? 0 : digit;
+    render();
+  }
+
   function enterDigit(digit) {
-    if (!playable() || selected < 0 || game.remaining(digit) === 0) return;
+    if (!playable() || game.remaining(digit) === 0) return;
+    if (selected < 0) {
+      toggleHighlight(digit);
+      return;
+    }
     const changed = pencil ? game.toggleNote(selected, digit) : game.place(selected, digit);
-    if (changed) afterMove();
+    if (changed) {
+      highlighted = digit;
+      afterMove();
+    }
   }
 
   function eraseSelected() {
@@ -325,6 +343,7 @@ function startGame(puzzle) {
     const cell = game.undo();
     if (cell !== null) {
       selected = cell;
+      if (game.values[cell]) highlighted = game.values[cell];
       afterMove();
     }
   }
@@ -338,6 +357,7 @@ function startGame(puzzle) {
   function select(i) {
     if (paused) return;
     selected = i;
+    if (game.values[i]) highlighted = game.values[i];
     cells[i].focus({ preventScroll: true });
     render();
   }
@@ -382,10 +402,71 @@ function startGame(puzzle) {
     const cell = event.target.closest('.cell');
     if (cell) select(Number(cell.dataset.cell));
   });
+
+  // A quick press enters a digit. A press held for HOLD_MS highlights it instead,
+  // so the click that follows on release must not enter it.
+  let holdTimer = null;
+  let holdStart = null;
+  let swallowClick = false;
+
+  function cancelHold() {
+    clearTimeout(holdTimer);
+    holdTimer = null;
+  }
+
+  $('pad').addEventListener('pointerdown', (event) => {
+    swallowClick = false;
+    const button = event.target.closest('.digit');
+    if (!button || button.disabled || event.button !== 0) return;
+    holdStart = [event.clientX, event.clientY];
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      swallowClick = true;
+      toggleHighlight(Number(button.dataset.digit));
+      if (navigator.userActivation?.hasBeenActive) navigator.vibrate?.(10);
+    }, HOLD_MS);
+  });
+  $('pad').addEventListener('pointermove', (event) => {
+    if (holdTimer === null) return;
+    const drift = Math.hypot(event.clientX - holdStart[0], event.clientY - holdStart[1]);
+    if (drift > HOLD_MOVE_PX) {
+      cancelHold();
+      swallowClick = true;
+    }
+  });
+  $('pad').addEventListener('pointerup', cancelHold);
+  $('pad').addEventListener('pointercancel', cancelHold);
+  // Stops the phone's own long-press menu from appearing over the pad.
+  $('pad').addEventListener('contextmenu', (event) => event.preventDefault());
+
   $('pad').addEventListener('click', (event) => {
     const button = event.target.closest('.digit');
-    if (button) enterDigit(Number(button.dataset.digit));
+    if (!button) return;
+    // Keyboard activation has detail 0 and never follows a held press.
+    if (event.detail && swallowClick) {
+      swallowClick = false;
+      return;
+    }
+    enterDigit(Number(button.dataset.digit));
   });
+
+  function setHoverDigit(digit) {
+    if (digit !== hoverDigit) {
+      hoverDigit = digit;
+      render();
+    }
+  }
+
+  $('pad').addEventListener('pointerover', (event) => {
+    if (event.pointerType !== 'mouse') return;
+    const button = event.target.closest('.digit');
+    setHoverDigit(button && !button.disabled ? Number(button.dataset.digit) : 0);
+  });
+  $('pad').addEventListener('pointerleave', () => {
+    cancelHold();
+    setHoverDigit(0);
+  });
+
   $('undo').addEventListener('click', undo);
   $('erase').addEventListener('click', eraseSelected);
   $('pencil').addEventListener('click', togglePencil);
@@ -424,6 +505,7 @@ function startGame(puzzle) {
     button.textContent = 'Restart';
     game.reset();
     selected = -1;
+    highlighted = 0;
     lastTick = performance.now();
     if (paused) setPaused(false);
     save();

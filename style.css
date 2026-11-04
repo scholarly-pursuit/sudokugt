@@ -140,15 +140,19 @@ body:has(#home:not([hidden])) .masthead { max-width: 640px; }
 
 .levels {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   margin-bottom: 12px;
 }
 
 .levels input { position: absolute; opacity: 0; }
 
+.levels label { display: flex; }
+
 .levels span {
-  display: block;
+  flex: 1;
+  display: grid;
+  place-items: center;
   padding: 10px 4px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -254,7 +258,6 @@ body:has(#home:not([hidden])) .masthead { max-width: 640px; }
   background: var(--accent-soft);
   color: var(--ink);
   font-weight: 600;
-  text-transform: capitalize;
 }
 
 .timer {
@@ -397,13 +400,14 @@ body:has(#home:not([hidden])) .masthead { max-width: 640px; }
 .sign.active { color: var(--accent); }
 .sign.active svg { stroke-width: 3.2; }
 
+/* Hidden rather than covered, so that no sign or border can show through. */
+.board.paused { visibility: hidden; }
+
 .paused-cover {
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
-  border-radius: 8px;
-  background: var(--paper);
 }
 
 .tools {
@@ -445,10 +449,15 @@ body:has(#home:not([hidden])) .masthead { max-width: 640px; }
   color: var(--accent-ink);
 }
 
+/* Holding a digit must not select its text or open the phone's callout. */
 .pad {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .digit {
@@ -475,6 +484,8 @@ body:has(#home:not([hidden])) .masthead { max-width: 640px; }
 
 .digit:disabled { color: var(--done); background: transparent; }
 .digit:disabled small { visibility: hidden; }
+
+.digit.active { background: var(--same); border-color: var(--accent); }
 
 .pencil-on .digit { color: var(--ink-soft); }
 .pencil-on .digit:disabled { color: var(--done); }
@@ -525,5 +536,13 @@ body:has(#home:not([hidden])) .masthead { max-width: 640px; }
   .pad { grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 4px; }
   .digit { padding: 6px 0 15px; font-size: 1.3rem; }
 
-  .keys { display: none; }
+  .keys-keyboard { display: none; }
+}
+
+@media (max-width: 480px) {
+  .levels { gap: 6px; }
+  .levels span { padding: 10px 2px; font-size: .875rem; }
+
+  /* Bold would make "Very easy" wrap and the row jump when it's selected. */
+  .levels input:checked + span { font-weight: inherit; }
 }

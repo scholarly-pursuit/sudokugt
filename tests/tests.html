@@ -15,7 +15,7 @@
   <script type="module">
     import {
       BOXES, COLUMNS, LEVELS, PAIRS, PEERS, ROWS, analyseCode, decodeCode, encodeSigns,
-      generatePuzzle, randomGrid, signsFromGrid, solveSigns,
+      generatePuzzle, randomGrid, signForcedCells, signsFromGrid, solveSigns,
     } from '../js/engine.js';
     import { Game, createStore } from '../js/game.js';
 
@@ -151,6 +151,46 @@
         }
       });
     }
+
+    test('sign-forced cells: same-direction signs force only the 1 and 9 in each box', () => {
+      // Every box increases rightwards and downwards, so only its corners are
+      // related to all 8 others. Solvability doesn't matter to this count.
+      const expected = BOXES.flatMap((box) => [
+        { cell: box[0], digit: 1 },
+        { cell: box[8], digit: 9 },
+      ]);
+      assertEqual(signForcedCells(decodeCode('A'.repeat(18))), expected);
+    });
+
+    test('sign-forced cells: a chain through a box forces every digit, including mid-range ones', () => {
+      const grid = randomGrid(seeded(17));
+      // Snakes through box 0 in order: 1 2 3, then 6 5 4, then 7 8 9.
+      [1, 2, 3, 6, 5, 4, 7, 8, 9].forEach((digit, k) => { grid[BOXES[0][k]] = digit; });
+      const inBox = signForcedCells(signsFromGrid(grid)).filter(({ cell }) => BOXES[0].includes(cell));
+      assertEqual(
+        inBox.map(({ cell, digit }) => [cell, digit]),
+        BOXES[0].map((cell) => [cell, grid[cell]]),
+      );
+    });
+
+    test('sign-forced cells always match the solution', () => {
+      const rng = seeded(19);
+      for (let i = 0; i < 100; i++) {
+        const grid = randomGrid(rng);
+        for (const { cell, digit } of signForcedCells(signsFromGrid(grid))) {
+          assertEqual(digit, grid[cell], `cell ${cell}`);
+        }
+      }
+    });
+
+    test('very easy means easy logic with at least 3 sign-forced cells', () => {
+      for (let seed = 1; seed <= 15; seed++) {
+        const veryEasy = generatePuzzle('very easy', seeded(seed * 31));
+        assert(signForcedCells(veryEasy.signs).length >= 3, 'very easy has too few forced cells');
+        const easy = generatePuzzle('easy', seeded(seed * 37));
+        assert(signForcedCells(easy.signs).length < 3, 'easy has too many forced cells');
+      }
+    });
 
     test('the same seed gives the same puzzle', () => {
       assertEqual(samplePuzzle(5).code, samplePuzzle(5).code);

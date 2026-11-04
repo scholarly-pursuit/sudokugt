@@ -23,6 +23,7 @@
     <section class="panel" aria-labelledby="new-heading">
       <h2 id="new-heading">New puzzle</h2>
       <div class="levels" role="radiogroup" aria-label="Difficulty">
+        <label><input type="radio" name="level" value="very easy"><span>Very easy</span></label>
         <label><input type="radio" name="level" value="easy" checked><span>Easy</span></label>
         <label><input type="radio" name="level" value="medium"><span>Medium</span></label>
         <label><input type="radio" name="level" value="hard"><span>Hard</span></label>
@@ -97,7 +98,8 @@
           <button id="copy" class="quiet" type="button">Copy puzzle link</button>
           <button id="restart" class="quiet" type="button">Restart</button>
         </div>
-        <p class="keys">Keyboard: arrows move, 1–9 enter, Backspace erases, N toggles pencil, Ctrl/Cmd+Z undoes.</p>
+        <p class="keys">Tap a number to enter it, or hold it to highlight it on the board.</p>
+        <p class="keys keys-keyboard">Keyboard: arrows move, 1–9 enter, Backspace erases, N toggles pencil, Ctrl/Cmd+Z undoes.</p>
       </div>
     </div>
 

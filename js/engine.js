@@ -3,8 +3,11 @@
 // Cells are indexed 0..80, row by row. A candidate set is a 9-bit mask where
 // bit k means the digit k + 1 is still possible. Grids hold digits 1..9.
 
-export const LEVELS = ['easy', 'medium', 'hard'];
+export const LEVELS = ['very easy', 'easy', 'medium', 'hard'];
 export const CODE_LENGTH = 18;
+
+// How many sign-forced cells an easy puzzle needs to count as very easy.
+const VERY_EASY_MIN_FORCED = 3;
 
 const ALL = 511;
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -257,12 +260,41 @@ function applyNakedPairs(d) {
 
 const isSolved = (d) => d.every((x) => (x & (x - 1)) === 0);
 
-// Rates a puzzle by the logic needed to finish it without guessing.
+// Cells whose digit follows from their own box's signs alone: a chain of signs
+// relates the cell to all 8 others, so its rank within the box is known.
+export function signForcedCells(signs) {
+  const greater = Array.from({ length: 81 }, () => []);
+  for (const [lo, hi] of toInequalities(signs)) greater[lo].push(hi);
+
+  const forced = [];
+  for (const box of BOXES) {
+    const above = new Map(box.map((i) => [i, new Set()]));
+    const collect = (i, seen) => {
+      for (const j of greater[i]) {
+        if (!seen.has(j)) {
+          seen.add(j);
+          collect(j, seen);
+        }
+      }
+    };
+    for (const i of box) collect(i, above.get(i));
+    for (const i of box) {
+      const below = box.filter((j) => above.get(j).has(i)).length;
+      if (below + above.get(i).size === 8) forced.push({ cell: i, digit: below + 1 });
+    }
+  }
+  return forced;
+}
+
+// Rates a puzzle by the logic needed to finish it without guessing, and for the
+// easiest puzzles, by how many obvious places there are to start.
 export function ratePuzzle(signs) {
   const inequalities = toInequalities(signs);
   const d = new Array(81).fill(ALL);
   if (!propagate(d, inequalities)) return null;
-  if (isSolved(d)) return 'easy';
+  if (isSolved(d)) {
+    return signForcedCells(signs).length >= VERY_EASY_MIN_FORCED ? 'very easy' : 'easy';
+  }
   while (applyLockedCandidates(d) || applyNakedPairs(d)) {
     if (!propagate(d, inequalities)) return null;
     if (isSolved(d)) return 'medium';
