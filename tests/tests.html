@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sudoku GT tests</title>
+  <style>
+    body { font: 15px/1.5 ui-monospace, Menlo, monospace; margin: 16px; }
+    .fail { color: #b3261e; font-weight: 700; }
+    .pass { color: #0f5c5c; }
+  </style>
+</head>
+<body>
+  <h1 id="summary">Running…</h1>
+  <ul id="results"></ul>
+  <script type="module">
+    import {
+      BOXES, COLUMNS, LEVELS, PAIRS, PEERS, ROWS, analyseCode, decodeCode, encodeSigns,
+      generatePuzzle, randomGrid, signsFromGrid, solveSigns,
+    } from '../js/engine.js';
+    import { Game, createStore } from '../js/game.js';
+
+    const results = [];
+    function test(name, fn) {
+      try {
+        fn();
+        results.push({ name, ok: true });
+      } catch (error) {
+        results.push({ name, ok: false, message: error.message });
+      }
+    }
+    function assert(condition, message = 'assertion failed') {
+      if (!condition) throw new Error(message);
+    }
+    function assertEqual(actual, expected, label = '') {
+      const a = JSON.stringify(actual);
+      const b = JSON.stringify(expected);
+      if (a !== b) throw new Error(`${label} expected ${b}, got ${a}`);
+    }
+
+    // Deterministic, so that a failing run can be reproduced.
+    function seeded(seed) {
+      return () => {
+        seed = (seed + 0x6d2b79f5) | 0;
+        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    // A second solution counter sharing nothing with the engine's solver. It
+    // lists every arrangement of 1-9 that fits each box's signs, then combines
+    // boxes in order, rejecting any repeat within a row or column.
+    function bruteCount(signs, limit = 2) {
+      const arrangements = BOXES.map((box) => {
+        const rules = [];
+        PAIRS.forEach(([a, b], k) => {
+          if (box.includes(a)) rules.push([box.indexOf(a), box.indexOf(b), signs[k] === 1]);
+        });
+        const digits = new Array(9).fill(0);
+        const list = [];
+        const place = (position, used) => {
+          if (position === 9) {
+            const rows = [0, 0, 0];
+            const cols = [0, 0, 0];
+            digits.forEach((digit, p) => {
+              rows[Math.floor(p / 3)] |= 1 << digit;
+              cols[p % 3] |= 1 << digit;
+            });
+            list.push({ rows, cols });
+            return;
+          }
+          for (let digit = 1; digit <= 9; digit++) {
+            if (used & (1 << digit)) continue;
+            digits[position] = digit;
+            const fits = rules.every(([a, b, aIsGreater]) => {
+              if (a > position || b > position) return true;
+              return aIsGreater ? digits[a] > digits[b] : digits[a] < digits[b];
+            });
+            if (fits) place(position + 1, used | (1 << digit));
+          }
+          digits[position] = 0;
+        };
+        place(0, 0);
+        return list;
+      });
+
+      const rowUsed = new Array(9).fill(0);
+      const colUsed = new Array(9).fill(0);
+      let found = 0;
+      const combine = (b) => {
+        if (b === 9) {
+          found++;
+          return;
+        }
+        const top = Math.floor(b / 3) * 3;
+        const left = (b % 3) * 3;
+        for (const { rows, cols } of arrangements[b]) {
+          let clash = false;
+          for (let k = 0; k < 3; k++) {
+            if (rowUsed[top + k] & rows[k] || colUsed[left + k] & cols[k]) clash = true;
+          }
+          if (clash) continue;
+          for (let k = 0; k < 3; k++) {
+            rowUsed[top + k] |= rows[k];
+            colUsed[left + k] |= cols[k];
+          }
+          combine(b + 1);
+          for (let k = 0; k < 3; k++) {
+            rowUsed[top + k] &= ~rows[k];
+            colUsed[left + k] &= ~cols[k];
+          }
+          if (found >= limit) return;
+        }
+      };
+      combine(0);
+      return found;
+    }
+
+    function isValidGrid(grid) {
+      const full = (cells) => new Set(cells.map((i) => grid[i])).size === 9;
+      return grid.every((d) => d >= 1 && d <= 9)
+        && [...ROWS, ...COLUMNS, ...BOXES].every(full);
+    }
+
+    const bit = (...digits) => digits.reduce((mask, d) => mask | (1 << (d - 1)), 0);
+
+    function samplePuzzle(seed = 1, level = 'easy') {
+      return generatePuzzle(level, seeded(seed));
+    }
+
+    test('there are 108 sign positions, all inside boxes, 12 per box', () => {
+      assertEqual(PAIRS.length, 108);
+      for (const box of BOXES) {
+        assertEqual(PAIRS.filter(([a, b]) => box.includes(a) && box.includes(b)).length, 12);
+      }
+    });
+
+    test('random grids are valid sudoku solutions', () => {
+      const rng = seeded(7);
+      for (let i = 0; i < 20; i++) assert(isValidGrid(randomGrid(rng)));
+    });
+
+    for (const level of LEVELS) {
+      test(`${level} puzzles: signs fit the solution, and one solution by a separate counter`, () => {
+        for (let seed = 1; seed <= 4; seed++) {
+          const puzzle = generatePuzzle(level, seeded(seed * 101));
+          assertEqual(puzzle.level, level);
+          assert(isValidGrid(puzzle.solution), 'solution is invalid');
+          assertEqual(puzzle.signs, signsFromGrid(puzzle.solution), 'signs');
+          assertEqual(bruteCount(puzzle.signs), 1, 'solution count');
+        }
+      });
+    }
+
+    test('the same seed gives the same puzzle', () => {
+      assertEqual(samplePuzzle(5).code, samplePuzzle(5).code);
+    });
+
+    test('puzzle codes round-trip to identical signs', () => {
+      const rng = seeded(11);
+      for (let i = 0; i < 50; i++) {
+        const signs = signsFromGrid(randomGrid(rng));
+        const code = encodeSigns(signs);
+        assertEqual(code.length, 18);
+        assert(/^[A-Za-z0-9_-]+$/.test(code), 'code has unsafe characters');
+        assertEqual(decodeCode(code), signs);
+      }
+    });
+
+    test('a known code keeps decoding to the same signs', () => {
+      // Guards the format: changing PAIRS or the encoding would break published links.
+      const signs = new Array(108).fill(0).map((_, i) => (i % 3 === 0 ? 1 : 0));
+      assertEqual(encodeSigns(signs), 'kkkkkkkkkkkkkkkkkk');
+      assertEqual(PAIRS[0], [0, 1]);
+      assertEqual(PAIRS[1], [0, 9]);
+      assertEqual(PAIRS[107], [79, 80]);
+    });
+
+    test('malformed codes are rejected', () => {
+      for (const code of ['', 'short', 'A'.repeat(17), 'A'.repeat(19), '!'.repeat(18), null, undefined]) {
+        assertEqual(decodeCode(code), null, String(code));
+        assertEqual(analyseCode(code), null, String(code));
+      }
+    });
+
+    test('codes with no solution are rejected', () => {
+      // With every sign the same way round, each box must hold its 1 (or its 9)
+      // in the same corner, which repeats that digit along a row.
+      for (const code of ['A'.repeat(18), '_'.repeat(18)]) {
+        assertEqual(bruteCount(decodeCode(code)), 0, code);
+        assertEqual(analyseCode(code), null, code);
+      }
+    });
+
+    test('codes with several solutions are rejected, and both counters agree', () => {
+      const rng = seeded(13);
+      let rejected = 0;
+      for (let tries = 0; tries < 200 && rejected < 3; tries++) {
+        const signs = signsFromGrid(randomGrid(rng));
+        const count = solveSigns(signs).length;
+        assertEqual(bruteCount(signs), count, 'solution count');
+        if (count === 2) {
+          assertEqual(analyseCode(encodeSigns(signs)), null);
+          rejected++;
+        }
+      }
+      assertEqual(rejected, 3, 'samples with several solutions');
+    });
+
+    test('a generated code loads back to the same puzzle', () => {
+      const puzzle = samplePuzzle(3);
+      const loaded = analyseCode(puzzle.code);
+      assertEqual(loaded.solution, puzzle.solution);
+      assertEqual(loaded.signs, puzzle.signs);
+      assertEqual(loaded.level, puzzle.level);
+    });
+
+    test('a correct number removes that digit from row, column and box notes', () => {
+      const puzzle = samplePuzzle(2);
+      const game = new Game(puzzle);
+      const digit = puzzle.solution[40];
+      const rowPeer = 36;
+      const colPeer = 4;
+      const boxPeer = 30;
+      const unrelated = 0;
+      for (const i of [rowPeer, colPeer, boxPeer, unrelated]) game.notes[i] = bit(digit);
+      game.place(40, digit);
+      assertEqual(game.notes[rowPeer], 0, 'row');
+      assertEqual(game.notes[colPeer], 0, 'column');
+      assertEqual(game.notes[boxPeer], 0, 'box');
+      assertEqual(game.notes[unrelated], bit(digit), 'unrelated cell');
+    });
+
+    test('a correct number removes notes ruled out by the signs', () => {
+      const puzzle = samplePuzzle(2);
+      for (let i = 0; i < 81; i++) {
+        const game = new Game(puzzle);
+        const digit = puzzle.solution[i];
+        for (const [j] of game.links[i]) game.notes[j] = 511;
+        game.place(i, digit);
+        for (const [j, neighbourIsGreater] of game.links[i]) {
+          for (let d = 1; d <= 9; d++) {
+            const kept = (game.notes[j] & bit(d)) !== 0;
+            const expected = neighbourIsGreater ? d > digit : d < digit;
+            assertEqual(kept, expected, `cell ${i} digit ${digit}, neighbour ${j} note ${d}`);
+          }
+        }
+      }
+    });
+
+    test('sign removal only reaches directly adjacent cells', () => {
+      const puzzle = samplePuzzle(2);
+      const game = new Game(puzzle);
+      const i = 0;
+      const peersOnly = PEERS[i].filter((j) => !game.links[i].some(([n]) => n === j));
+      for (const j of peersOnly) game.notes[j] = 511;
+      game.place(i, puzzle.solution[i]);
+      const expected = 511 & ~bit(puzzle.solution[i]);
+      for (const j of peersOnly) assertEqual(game.notes[j], expected, `cell ${j}`);
+    });
+
+    test('a wrong number counts as a mistake and removes no notes', () => {
+      const puzzle = samplePuzzle(2);
+      const game = new Game(puzzle);
+      game.notes = new Array(81).fill(511);
+      const wrong = (puzzle.solution[10] % 9) + 1;
+      game.place(10, wrong);
+      assertEqual(game.mistakes, 1);
+      assert(game.isWrong(10));
+      assertEqual(game.notes, new Array(81).fill(511));
+      game.erase(10);
+      assertEqual(game.values[10], 0);
+      assertEqual(game.notes[10], 511, 'own notes return after erasing');
+    });
+
+    test('repeating the same wrong number does not count twice', () => {
+      const puzzle = samplePuzzle(2);
+      const game = new Game(puzzle);
+      const wrong = (puzzle.solution[10] % 9) + 1;
+      game.place(10, wrong);
+      game.place(10, wrong);
+      assertEqual(game.mistakes, 1);
+    });
+
+    test('correct numbers lock, wrong ones can be replaced', () => {
+      const puzzle = samplePuzzle(2);
+      const game = new Game(puzzle);
+      const right = puzzle.solution[10];
+      game.place(10, (right % 9) + 1);
+      assert(game.place(10, right), 'wrong number should be replaceable');
+      assert(!game.place(10, (right % 9) + 1), 'correct number should lock');
+      assert(!game.erase(10), 'correct number should not erase');
+      assertEqual(game.values[10], right);
+    });
+
+    test('undo restores notes that a move removed, but not the mistake count', () => {
+      const puzzle = samplePuzzle(2);
+      const game = new Game(puzzle);
+      game.notes = new Array(81).fill(511);
+      game.place(40, puzzle.solution[40]);
+      assert(game.notes[41] !== 511, 'notes should have been removed');
+      assertEqual(game.undo(), 40);
+      assertEqual(game.values[40], 0);
+      assertEqual(game.notes, new Array(81).fill(511));
+
+      game.place(40, (puzzle.solution[40] % 9) + 1);
+      game.undo();
+      assertEqual(game.mistakes, 1);
+      assertEqual(game.undo(), null, 'nothing left to undo');
+    });
+
+    test('notes toggle on empty cells only', () => {
+      const puzzle = samplePuzzle(2);
+      const game = new Game(puzzle);
+      game.toggleNote(5, 3);
+      assertEqual(game.notes[5], bit(3));
+      game.toggleNote(5, 3);
+      assertEqual(game.notes[5], 0);
+      game.place(5, puzzle.solution[5]);
+      assert(!game.toggleNote(5, 3), 'filled cell takes no notes');
+    });
+
+    test('a hint fills the correct number and counts as a hint, not a mistake', () => {
+      const puzzle = samplePuzzle(2);
+      const game = new Game(puzzle);
+      assert(game.hint(7));
+      assertEqual(game.values[7], puzzle.solution[7]);
+      assertEqual([game.hints, game.mistakes], [1, 0]);
+      assert(!game.hint(7), 'no hint on a correct cell');
+      assertEqual(game.hints, 1);
+    });
+
+    test('remaining counts and completion', () => {
+      const puzzle = samplePuzzle(2);
+      const game = new Game(puzzle);
+      assertEqual(game.remaining(1), 9);
+      assert(!game.complete);
+      puzzle.solution.forEach((digit, i) => game.place(i, digit));
+      assert(game.complete);
+      for (let d = 1; d <= 9; d++) assertEqual(game.remaining(d), 0);
+    });
+
+    test('save and restore round-trips, including undo', () => {
+      const puzzle = samplePuzzle(2);
+      const game = new Game(puzzle);
+      game.notes[9] = 511;
+      game.toggleNote(20, 4);
+      game.place(0, puzzle.solution[0]);
+      game.place(1, (puzzle.solution[1] % 9) + 1);
+      game.elapsedMs = 1234;
+      const restored = new Game(puzzle, JSON.parse(JSON.stringify(game.toJSON())));
+      assertEqual(restored.toJSON(), game.toJSON());
+      assertEqual(restored.undo(), 1);
+      assertEqual(restored.values[1], 0);
+    });
+
+    function memoryStorage() {
+      const data = new Map();
+      return {
+        getItem: (key) => (data.has(key) ? data.get(key) : null),
+        setItem: (key, value) => data.set(key, value),
+      };
+    }
+
+    test('the store lists recent puzzles and keeps the first solve', () => {
+      const store = createStore(memoryStorage());
+      assertEqual(store.recent(), []);
+      store.remember('a', 'easy');
+      store.remember('b', 'hard');
+      assertEqual(store.recent().map((p) => p.code).sort(), ['a', 'b']);
+      store.markSolved('a', { at: 1, ms: 10, mistakes: 0, hints: 0 });
+      store.markSolved('a', { at: 2, ms: 5, mistakes: 0, hints: 0 });
+      assertEqual(store.record('a').solved.at, 1);
+      store.remember('a', 'easy');
+      assertEqual(store.record('a').solved.at, 1, 'solve survives reopening');
+    });
+
+    test('the store keeps working when storage fails', () => {
+      const broken = {
+        getItem() { throw new Error('blocked'); },
+        setItem() { throw new Error('blocked'); },
+      };
+      for (const store of [createStore(broken), createStore(null)]) {
+        store.remember('a', 'easy');
+        store.saveProgress('a', {});
+        assertEqual(store.loadProgress('a'), null);
+        assertEqual(store.recent(), []);
+      }
+    });
+
+    const failed = results.filter((r) => !r.ok);
+    document.getElementById('summary').textContent = failed.length
+      ? `${failed.length} of ${results.length} tests failed`
+      : `All ${results.length} tests passed`;
+    document.getElementById('summary').className = failed.length ? 'fail' : 'pass';
+    document.getElementById('results').replaceChildren(...results.map((r) => {
+      const item = document.createElement('li');
+      item.className = r.ok ? 'pass' : 'fail';
+      item.textContent = r.ok ? r.name : `${r.name}: ${r.message}`;
+      return item;
+    }));
+    window.testResults = results;
+  </script>
+</body>
+</html>

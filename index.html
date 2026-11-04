@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sudoku GT</title>
+  <meta name="description" content="Play Sudoku GT, the sudoku variant solved from greater-than signs alone, with highlighting, pencil notes and automatic checking.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f5c5c'/%3E%3Cpath d='M11 7l10 9-10 9' fill='none' stroke='%23fff' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="js/ui.js"></script>
+</head>
+<body>
+  <header class="masthead">
+    <a class="wordmark" href="./"><span class="wordmark-mark" aria-hidden="true">&gt;</span>Sudoku GT</a>
+  </header>
+
+  <main id="home" hidden>
+    <section class="intro">
+      <h1>Sudoku with no starting numbers</h1>
+      <p>Fill the grid so that every row, column and 3&times;3 box holds 1 to 9 once. There are no numbers to start from. The only clues are the signs between neighbouring cells inside each box, and each sign points to the smaller number.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="new-heading">
+      <h2 id="new-heading">New puzzle</h2>
+      <div class="levels" role="radiogroup" aria-label="Difficulty">
+        <label><input type="radio" name="level" value="easy" checked><span>Easy</span></label>
+        <label><input type="radio" name="level" value="medium"><span>Medium</span></label>
+        <label><input type="radio" name="level" value="hard"><span>Hard</span></label>
+      </div>
+      <button id="generate" class="primary" type="button">Generate puzzle</button>
+      <p id="generate-status" class="status" role="status"></p>
+      <div id="generated" class="generated" hidden>
+        <p>Your puzzle's permanent link:</p>
+        <p id="generated-link"></p>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="recent-heading">
+      <h2 id="recent-heading">Your puzzles</h2>
+      <p class="legend">Links change colour once opened in this browser, and <span class="tick">✓</span> marks a solved puzzle.</p>
+      <ul id="recent" class="recent"></ul>
+      <p id="recent-empty" class="status">Puzzles you generate or open will appear here.</p>
+    </section>
+  </main>
+
+  <main id="puzzle" hidden>
+    <p id="puzzle-status" class="status" role="status">Loading puzzle…</p>
+
+    <div id="puzzle-error" class="panel" hidden>
+      <h1>This isn't a valid puzzle</h1>
+      <p>The link may be incomplete, or it doesn't lead to a puzzle with exactly one solution.</p>
+      <a class="primary" href="./">Get a new puzzle</a>
+    </div>
+
+    <div id="stage" class="stage" hidden>
+      <div class="stage-top">
+        <div class="facts">
+          <span id="level" class="chip"></span>
+          <span>Mistakes <strong id="mistakes">0</strong></span>
+          <span>Hints <strong id="hints">0</strong></span>
+          <span class="timer">
+            <strong id="time">0:00</strong>
+            <button id="pause" class="quiet" type="button" aria-pressed="false">Pause</button>
+          </span>
+        </div>
+        <p id="solved-banner" class="solved-banner" hidden></p>
+      </div>
+
+      <div class="board-wrap">
+        <div id="board" class="board" role="grid" aria-label="Sudoku GT board"></div>
+        <div id="paused" class="paused-cover" hidden>
+          <button id="resume" class="primary" type="button">Resume</button>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="tools">
+          <button id="undo" class="tool" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7 4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2"/></svg>
+            Undo
+          </button>
+          <button id="erase" class="tool" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 20-5-5L14 4l7 7-9 9zM8 9l7 7"/></svg>
+            Erase
+          </button>
+          <button id="pencil" class="tool" type="button" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 1-5L16 4l4 4L9 19zM14 6l4 4"/></svg>
+            <span>Pencil <b id="pencil-state">off</b></span>
+          </button>
+          <button id="hint" class="tool" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.8.8 1 1.5 1 2.5h6c0-1 .2-1.700 1-2.500A6 6 0 0 0 12 3z"/></svg>
+            Hint
+          </button>
+        </div>
+        <div id="pad" class="pad" aria-label="Number pad"></div>
+        <div class="links">
+          <button id="copy" class="quiet" type="button">Copy puzzle link</button>
+          <button id="restart" class="quiet" type="button">Restart</button>
+        </div>
+        <p class="keys">Keyboard: arrows move, 1–9 enter, Backspace erases, N toggles pencil, Ctrl/Cmd+Z undoes.</p>
+      </div>
+    </div>
+
+    <dialog id="win" class="win">
+      <h2>Solved</h2>
+      <p id="win-summary"></p>
+      <form method="dialog" class="win-actions">
+        <a class="primary" href="./">New puzzle</a>
+        <button class="quiet">View board</button>
+      </form>
+    </dialog>
+  </main>
+
+  <noscript><p class="status">Sudoku GT needs JavaScript to run.</p></noscript>
+</body>
+</html>
