@@ -140,7 +140,7 @@ body:has(#home:not([hidden])) .masthead { max-width: 640px; }
 
 .levels {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   margin-bottom: 12px;
 }
@@ -537,12 +537,4 @@ body:has(#home:not([hidden])) .masthead { max-width: 640px; }
   .digit { padding: 6px 0 15px; font-size: 1.3rem; }
 
   .keys-keyboard { display: none; }
-}
-
-@media (max-width: 480px) {
-  .levels { gap: 6px; }
-  .levels span { padding: 10px 2px; font-size: .875rem; }
-
-  /* Bold would make "Very easy" wrap and the row jump when it's selected. */
-  .levels input:checked + span { font-weight: inherit; }
 }

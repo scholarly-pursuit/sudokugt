@@ -3,7 +3,7 @@
 // Cells are indexed 0..80, row by row. A candidate set is a 9-bit mask where
 // bit k means the digit k + 1 is still possible. Grids hold digits 1..9.
 
-export const LEVELS = ['very easy', 'easy', 'medium', 'hard'];
+export const LEVELS = ['very easy', 'easy', 'medium', 'hard', 'expert', 'master'];
 export const CODE_LENGTH = 18;
 
 // How many sign-forced cells an easy puzzle needs to count as very easy.
@@ -258,7 +258,206 @@ function applyNakedPairs(d) {
   return changed;
 }
 
+// The techniques below expect fully propagated candidates, so each stops at its
+// first change: a cell narrowed to one digit makes later checks in the pass unsound.
+
+function applyNakedTriples(d) {
+  for (const unit of UNITS) {
+    const open = unit.filter((i) => POPCOUNT[d[i]] > 1);
+    for (let a = 0; a < open.length; a++) {
+      for (let b = a + 1; b < open.length; b++) {
+        for (let c = b + 1; c < open.length; c++) {
+          const mask = d[open[a]] | d[open[b]] | d[open[c]];
+          if (POPCOUNT[mask] !== 3) continue;
+          let changed = false;
+          for (const i of open) {
+            if (i !== open[a] && i !== open[b] && i !== open[c] && d[i] & mask) {
+              d[i] &= ~mask;
+              changed = true;
+            }
+          }
+          if (changed) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// Two or three digits confined to the same number of cells clear those cells' other notes.
+function applyHiddenSets(d) {
+  for (const unit of UNITS) {
+    const open = unit.filter((i) => POPCOUNT[d[i]] > 1);
+    const digits = [];
+    for (let m = 1; m < 512; m <<= 1) if (open.some((i) => d[i] & m)) digits.push(m);
+
+    const confine = (mask, size) => {
+      const cells = open.filter((i) => d[i] & mask);
+      if (cells.length !== size) return false;
+      let changed = false;
+      for (const i of cells) {
+        if (d[i] & ~mask) {
+          d[i] &= mask;
+          changed = true;
+        }
+      }
+      return changed;
+    };
+
+    for (let a = 0; a < digits.length; a++) {
+      for (let b = a + 1; b < digits.length; b++) {
+        if (confine(digits[a] | digits[b], 2)) return true;
+        for (let c = b + 1; c < digits.length; c++) {
+          if (confine(digits[a] | digits[b] | digits[c], 3)) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function applyXWings(d) {
+  const directions = [
+    [ROWS, COLUMNS, (i) => i % 9],
+    [COLUMNS, ROWS, (i) => Math.floor(i / 9)],
+  ];
+  for (let m = 1; m < 512; m <<= 1) {
+    for (const [lines, crossLines, crossOf] of directions) {
+      const spots = lines.map((line) => line.filter((i) => d[i] & m).map(crossOf));
+      for (let a = 0; a < 9; a++) {
+        if (spots[a].length !== 2) continue;
+        for (let b = a + 1; b < 9; b++) {
+          if (spots[b].length !== 2 || spots[a][0] !== spots[b][0] || spots[a][1] !== spots[b][1]) continue;
+          let changed = false;
+          for (const cross of spots[a]) {
+            for (const i of crossLines[cross]) {
+              if (!lines[a].includes(i) && !lines[b].includes(i) && d[i] & m) {
+                d[i] &= ~m;
+                changed = true;
+              }
+            }
+          }
+          if (changed) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// Keeps only the notes that appear in some arrangement of a box fitting its signs.
+function applyBoxSigns(d, inequalities) {
+  for (const box of BOXES) {
+    const open = box.filter((i) => POPCOUNT[d[i]] > 1);
+    if (open.length === 0) continue;
+    const signs = inequalities.filter(([lo, hi]) => box.includes(lo) && box.includes(hi));
+    const value = new Array(81).fill(0);
+    let used = 0;
+    for (const i of box) {
+      if (POPCOUNT[d[i]] === 1) {
+        value[i] = d[i];
+        used |= d[i];
+      }
+    }
+
+    const possible = new Array(81).fill(0);
+    const place = (k, taken) => {
+      if (k === open.length) {
+        if (signs.every(([lo, hi]) => value[lo] < value[hi])) {
+          for (const i of open) possible[i] |= value[i];
+        }
+        return;
+      }
+      const i = open[k];
+      for (let m = 1; m < 512; m <<= 1) {
+        if (d[i] & m && !(taken & m)) {
+          value[i] = m;
+          place(k + 1, taken | m);
+        }
+      }
+    };
+    place(0, used);
+
+    let changed = false;
+    for (const i of open) {
+      if (possible[i] !== d[i]) {
+        d[i] = possible[i];
+        changed = true;
+      }
+    }
+    if (changed) return true;
+  }
+  return false;
+}
+
+// Tries every way of placing one digit across the grid and removes the notes no
+// placement uses. No technique limited to one digit, such as a Swordfish or an
+// X-cycle, can find anything this misses.
+function applyDigitPlacements(d) {
+  const boxOf = (i) => Math.floor(i / 27) * 3 + Math.floor((i % 9) / 3);
+  for (let m = 1; m < 512; m <<= 1) {
+    const options = ROWS.map((row) => row.filter((i) => d[i] & m));
+    const used = new Array(81).fill(false);
+    const path = new Array(9);
+    const place = (r, columns, boxes) => {
+      if (r === 9) {
+        for (const i of path) used[i] = true;
+        return;
+      }
+      for (const i of options[r]) {
+        const column = 1 << (i % 9);
+        const box = 1 << boxOf(i);
+        if (columns & column || boxes & box) continue;
+        path[r] = i;
+        place(r + 1, columns | column, boxes | box);
+      }
+    };
+    place(0, 0, 0);
+
+    let changed = false;
+    for (let i = 0; i < 81; i++) {
+      if (d[i] & m && !used[i]) {
+        d[i] &= ~m;
+        changed = true;
+      }
+    }
+    if (changed) return true;
+  }
+  return false;
+}
+
+// The extra techniques each level adds, easiest first. A puzzle that needs more
+// than the last of these is rated master.
+const TECHNIQUES = [
+  ['medium', [applyLockedCandidates, applyNakedPairs]],
+  ['hard', [applyNakedTriples, applyHiddenSets, applyXWings, applyBoxSigns]],
+  ['expert', [applyDigitPlacements]],
+];
+
 const isSolved = (d) => d.every((x) => (x & (x - 1)) === 0);
+
+// Applies the techniques, always preferring the easiest, until none has an effect.
+function narrow(d, inequalities, techniques) {
+  while (!isSolved(d) && techniques.some((apply) => apply(d, inequalities))) {
+    if (!propagate(d, inequalities)) return false;
+  }
+  return true;
+}
+
+// The candidates left using only the techniques available at a level.
+export function candidatesAfter(signs, level) {
+  const inequalities = toInequalities(signs);
+  const d = new Array(81).fill(ALL);
+  propagate(d, inequalities);
+  const available = [];
+  for (const [name, techniques] of TECHNIQUES) {
+    if (level === 'easy') break;
+    available.push(...techniques);
+    narrow(d, inequalities, available);
+    if (name === level) break;
+  }
+  return d;
+}
 
 // Cells whose digit follows from their own box's signs alone: a chain of signs
 // relates the cell to all 8 others, so its rank within the box is known.
@@ -295,11 +494,13 @@ export function ratePuzzle(signs) {
   if (isSolved(d)) {
     return signForcedCells(signs).length >= VERY_EASY_MIN_FORCED ? 'very easy' : 'easy';
   }
-  while (applyLockedCandidates(d) || applyNakedPairs(d)) {
-    if (!propagate(d, inequalities)) return null;
-    if (isSolved(d)) return 'medium';
+  const available = [];
+  for (const [level, techniques] of TECHNIQUES) {
+    available.push(...techniques);
+    if (!narrow(d, inequalities, available)) return null;
+    if (isSolved(d)) return level;
   }
-  return 'hard';
+  return 'master';
 }
 
 // Returns a puzzle with exactly one solution at the requested level.

@@ -14,8 +14,8 @@
   <ul id="results"></ul>
   <script type="module">
     import {
-      BOXES, COLUMNS, LEVELS, PAIRS, PEERS, ROWS, analyseCode, decodeCode, encodeSigns,
-      generatePuzzle, randomGrid, signForcedCells, signsFromGrid, solveSigns,
+      BOXES, COLUMNS, LEVELS, PAIRS, PEERS, ROWS, analyseCode, candidatesAfter, decodeCode, encodeSigns,
+      generatePuzzle, randomGrid, ratePuzzle, signForcedCells, signsFromGrid, solveSigns,
     } from '../js/engine.js';
     import { Game, createStore } from '../js/game.js';
 
@@ -190,6 +190,37 @@
         const easy = generatePuzzle('easy', seeded(seed * 37));
         assert(signForcedCells(easy.signs).length < 3, 'easy has too many forced cells');
       }
+    });
+
+    test('each level only removes wrong notes, and solves exactly what its rating says', () => {
+      const ranks = { 'very easy': 0, easy: 0, medium: 1, hard: 2, expert: 3, master: 4 };
+      const steps = ['easy', 'medium', 'hard', 'expert'];
+      const seen = new Set();
+      const rng = seeded(23);
+      for (let tested = 0; tested < 60; ) {
+        const grid = randomGrid(rng);
+        const signs = signsFromGrid(grid);
+        if (solveSigns(signs).length !== 1) continue;
+        tested++;
+        const rating = ratePuzzle(signs);
+        seen.add(rating);
+        for (const step of steps) {
+          const notes = candidatesAfter(signs, step);
+          grid.forEach((digit, i) => {
+            assert(notes[i] & bit(digit), `${step} removed the true digit from cell ${i}`);
+          });
+          const solved = notes.every((mask) => (mask & (mask - 1)) === 0);
+          assertEqual(solved, ranks[rating] <= ranks[step], `${rating} puzzle using ${step} techniques`);
+        }
+      }
+      for (const level of ['hard', 'expert', 'master']) assert(seen.has(level), `no ${level} puzzle in the sample`);
+    });
+
+    test('a known puzzle needing reasoning inside a box stays rated hard', () => {
+      // A real puzzle a player got stuck on: no chains needed, but more than pairs.
+      const puzzle = analyseCode('i6MRZ5nkMTb7aZxPJR');
+      assertEqual(puzzle.level, 'hard');
+      assertEqual([puzzle.solution[1], puzzle.solution[2], puzzle.solution[12]], [2, 9, 1]);
     });
 
     test('the same seed gives the same puzzle', () => {
